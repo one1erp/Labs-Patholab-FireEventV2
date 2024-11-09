@@ -1,52 +1,37 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data.SqlClient;
-using System.Diagnostics;
-using System.Drawing;
-using System.Data;
-using System.Linq;
-using System.Text;
-using System.Windows.Forms;
-using System.Runtime.InteropServices;
-using ADODB;
-using LSExtensionWindowLib;
+﻿using LSExtensionWindowLib;
 using LSSERVICEPROVIDERLib;
-using Microsoft.Win32;
 using MSXML;
-
-//using Oracle.ManagedDataAccess.Client;
-//using Oracle.ManagedDataAccess.Types;
 using Oracle.ManagedDataAccess.Client;
 using Patholab_Common;
-using System.Security.Policy;
-//using Patholab_Common;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
 
 namespace FireEventV2
 {
-
+    
     [ComVisible(true)]
     [ProgId("FireEventV2.FireEvent")]
 
     public partial class FireEventCls : UserControl, IExtensionWindow
     {
-
-        //B00001/12
-        //B00001.12ץ1
         #region Ctor
 
         public FireEventCls()
         {
             try
             {
-
                 InitializeComponent();
                 BackColor = Color.FromName("Control");
                 _dataItems = new List<DataItem>();
             }
             catch (Exception e)
             {
-                //Logger.WriteLogFile(e);
+                Logger.WriteExceptionToLog(e);
             }
         }
 
@@ -147,13 +132,8 @@ namespace FireEventV2
             INautilusDBConnection dbConnection;
             if (_sp != null)
             {
-
-              // Debugger.Launch();
                 dbConnection = _sp.QueryServiceProvider("DBConnection") as NautilusDBConnection;
                 rs = _sp.QueryServiceProvider("RecordSet") as NautilusRecordSet;
-
-
-
             }
             else
             {
@@ -172,22 +152,18 @@ namespace FireEventV2
             if (!string.IsNullOrEmpty(_phraseEntryQuery))
             {
                 _phrase2Execute = GetPhraseEntry(_phraseHeaderName, _phraseEntryQuery);
-
             }
 
 
         }
 
-   
+
 
         public void SetParameters(string parameters)
         {
-
             try
             {
-
-
-                if (listViewEntities.Columns.Count <= 0) //first time
+                if (listViewEntities.Columns.Count <= 0) //while screen is loading
                 {
                     int index = 0;
                     var splitedParameters = parameters.Split(';');
@@ -209,8 +185,8 @@ namespace FireEventV2
             }
             catch (Exception e)
             {
-
                 MessageBox.Show("לא הוגדרו פרמטרים כראוי,לא ניתן להשתמש בתוכנית");
+                Logger.WriteExceptionToLog(e);
             }
         }
 
@@ -218,8 +194,6 @@ namespace FireEventV2
         {
             try
             {
-
-
                 if (cmd != null) cmd.Dispose();
                 if (_connection != null) _connection.Close();
 
@@ -227,7 +201,7 @@ namespace FireEventV2
             }
             catch (Exception ex)
             {
-
+                Logger.WriteExceptionToLog(ex);
                 return true;
             }
         }
@@ -242,7 +216,6 @@ namespace FireEventV2
             _ntlsSite.SetWindowInternalName("Fire Event");
             _ntlsSite.SetWindowRegistryName("Fire Event");
             _ntlsSite.SetWindowTitle("Fire Event");
-        
         }
 
         public WindowButtonsType GetButtons()
@@ -286,7 +259,7 @@ namespace FireEventV2
             {
                 _processXml = _sp.QueryServiceProvider("ProcessXML") as NautilusProcessXML;
                 _ntlsUser = _sp.QueryServiceProvider("User") as NautilusUser;
-                
+
             }
             else
             {
@@ -309,7 +282,7 @@ namespace FireEventV2
         private string _whereClause = "";
         private Phrase_entry _phrase2Execute;
         private string applicationCode;
-
+        private string sdgLogDesc;
 
         private void texEditEntity_KeyPress(object sender, KeyPressEventArgs e)
         {
@@ -319,31 +292,23 @@ namespace FireEventV2
 
                 if (e.KeyChar == (char)13 && txtEditEntity.Text != "") //Enter
                 {
-                 
+
                     //Checks if it's already in list view
                     if (!ListViewContains())
                     {
 
-
-                        //Build query
+                        
+                        // Build query
                         if (!string.IsNullOrEmpty(txtEditEntity.Text))
-                        {
-                            sql = "select  " + _barcodeField + ",";
-
-                            if (!string.IsNullOrEmpty(_displayFields))
-                                sql += _displayFields + ",";
-
-                            sql += _tableName + "." + _tableName + "_ID EntityId," + " Status IconStatus   from lims_sys." + _tableName +
-                                " ,lims_sys." + _tableName + "_USER  " +
-                                "WHERE " + _tableName + "." + _tableName + "_ID = " + _tableName + "_USER." + _tableName + "_ID AND "
-                      + _barcodeField + " = '" + txtEditEntity.Text + "'";
-
+                        { sql = $@"SELECT {_barcodeField}, {(_displayFields != null ? $"{_displayFields}," : string.Empty)} {_tableName}.{_tableName}_ID EntityId, Status IconStatus 
+                                  FROM lims_sys.{_tableName}, lims_sys.{_tableName}_USER WHERE {_tableName}.{_tableName}_ID = {_tableName}_USER.{_tableName}_ID AND {_barcodeField} = '{txtEditEntity.Text}'";
                         }
+
 
                         //Add condition to query
                         if (!string.IsNullOrEmpty(_whereClause))
                         {
-                            sql += " and " + _whereClause;
+                            sql += $" and  {_whereClause}";
                         }
 
                         cmd = new OracleCommand(sql, _connection);
@@ -415,11 +380,7 @@ namespace FireEventV2
             {
                 MessageBox.Show("Error" + e1.Message + e1.StackTrace);
 
-                //Logger.WriteLogFile(e1);
-            }
-            finally
-            {
-                //close reader
+                Logger.WriteExceptionToLog(e1);
             }
 
         }
@@ -458,12 +419,15 @@ namespace FireEventV2
                     var barcodeField = item.SubItems[0].Text;
                     DataItem dataItem = _dataItems.FirstOrDefault(x => x.Name == barcodeField);
 
-                    //run event
+                    //run event                    
                     if (!string.IsNullOrEmpty(_eventName))
                     {
-                        RunEvent(barcodeField);
-                        Add2Log(dataItem.ID);
+                        if (_eventName != "NO_EVENT")
+                        {
+                            RunEvent(barcodeField);
+                        }
 
+                        Add2Log(dataItem.ID, dataItem.Name);
                     }
                 }
                 if (!string.IsNullOrEmpty(_phraseEntryQuery) && !string.IsNullOrEmpty(_fieldForUpdate))
@@ -478,7 +442,7 @@ namespace FireEventV2
                         {
                             _valueForUpdate = ExecutePhraseQuery(_phrase2Execute, dataItem.Name);
                             UpdateData(dataItem.ID, _valueForUpdate);
-                            Add2Log(dataItem.ID);
+                            Add2Log(dataItem.ID, dataItem.Name);
                         }
                     }
                 }
@@ -493,7 +457,7 @@ namespace FireEventV2
             {
                 MessageBox.Show("Error" + e1.Message);
 
-                //Logger.WriteLogFile(e1);
+                Logger.WriteExceptionToLog(e1);
             }
         }
 
@@ -523,8 +487,8 @@ namespace FireEventV2
             }
             catch (Exception ex)
             {
-
                 MessageBox.Show(ex.Message);
+                Logger.WriteExceptionToLog(ex);
             }
             finally
             {
@@ -563,20 +527,20 @@ namespace FireEventV2
                     var C = ntlsCon.GetServerIsProxy();
                     var C2 = ntlsCon.GetServerName();
                     var C4 = ntlsCon.GetServerType();
-                  
-                    var C6= ntlsCon.GetServerExtra();
-         
+
+                    var C6 = ntlsCon.GetServerExtra();
+
                     var C8 = ntlsCon.GetPassword();
-                    var C9= ntlsCon.GetLimsUserPwd();
+                    var C9 = ntlsCon.GetLimsUserPwd();
                     var C10 = ntlsCon.GetServerIsProxy();
                     var DD = _ntlsSite;
 
-                
-                   
+
+
 
                     var u = _ntlsUser.GetOperatorName();
                     var u1 = _ntlsUser.GetWorkstationName();
-                    
+
 
 
                     _connectionString = ntlsCon.GetADOConnectionString();
@@ -589,7 +553,7 @@ namespace FireEventV2
                     {
                         cs += splited[i] + ';';
                     }
-//<<<<<<< .mine
+                    //<<<<<<< .mine
                     var username = ntlsCon.GetUsername();
                     if (string.IsNullOrEmpty(username))
                     {
@@ -601,7 +565,7 @@ namespace FireEventV2
                     //Create the connection
                     connection = new OracleConnection(cs);
 
-                  
+
 
                     // Open the connection
                     connection.Open();
@@ -664,7 +628,7 @@ namespace FireEventV2
 
         private void InitControls()
         {
-
+            VersionValidator.ValidateRefVersions(Assembly.GetExecutingAssembly());
             //Set title
             lblTitle.Text = this._titleName;
 
@@ -697,36 +661,34 @@ namespace FireEventV2
 
         private void LoadPictures()
         {
-//<<<<<<< .mine
- //+//           string ResourcePath = @"HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Thermo\Nautilus\9.4\Directory";
- 
-  var path = Utils.GetResourcePath();
-               
+
+            var path = Utils.GetResourcePath();
+
 
 
             if (path != null)
             {
                 path += "\\";
 
-                //  path = @"C:\Program Files (x86)\Thermo\Nautilus\Resource\";
-
-                _entityIcons = new Dictionary<string, string>();
-                _entityIcons.Add("not status", _tableName + ".ico");
-                _entityIcons.Add("A", path + _tableName + "a" + ".ico");
-                _entityIcons.Add("C", path + _tableName + "c" + ".ico");
-                _entityIcons.Add("P", path + _tableName + "p" + ".ico");
-                _entityIcons.Add("I", path + _tableName + "i" + ".ico");
-                _entityIcons.Add("R", path + _tableName + "r" + ".ico");
-                _entityIcons.Add("S", path + _tableName + "s" + ".ico");
-                _entityIcons.Add("U", path + _tableName + "u" + ".ico");
-                _entityIcons.Add("V", path + _tableName + "v" + ".ico");
-                _entityIcons.Add("X", path + _tableName + "x" + ".ico");
+                _entityIcons = new Dictionary<string, string>
+                {
+                    { "not status", _tableName + ".ico" },
+                    { "A", path + _tableName + "a" + ".ico" },
+                    { "C", path + _tableName + "c" + ".ico" },
+                    { "P", path + _tableName + "p" + ".ico" },
+                    { "I", path + _tableName + "i" + ".ico" },
+                    { "R", path + _tableName + "r" + ".ico" },
+                    { "S", path + _tableName + "s" + ".ico" },
+                    { "U", path + _tableName + "u" + ".ico" },
+                    { "V", path + _tableName + "v" + ".ico" },
+                    { "X", path + _tableName + "x" + ".ico" }
+                };
             }
         }
 
         private void RunEvent(string entityName)
         {
-            
+
 
             //Creates fire event xml
             var doc = Create_XML(entityName);
@@ -748,8 +710,7 @@ namespace FireEventV2
                 }
                 catch (Exception e)
                 {
-
-
+                    Logger.WriteExceptionToLog(e);
                 }
             }
         }
@@ -790,8 +751,6 @@ namespace FireEventV2
 
         private Phrase_entry GetPhraseEntry(string phraseHeaderName, string phraseEntryName)
         {
-
-
 
             string sql = "select phrase_description,phrase_info from lims_sys.phrase_entry " +
                          "where phrase_id = (select phrase_id from lims_sys.phrase_header where " +
@@ -870,14 +829,15 @@ namespace FireEventV2
 
             cmd = new OracleCommand(sql, _connection);
             var rowsAffected = cmd.ExecuteNonQuery();
-
-
-
         }
 
-        private void Add2Log(string id)
+        private void Add2Log(string id, string name)
         {
             string sdgId4Log = "";
+
+            sdgLogDesc = applicationCode != "NO_EVENT" ? $"{applicationCode} {name}" : $"{_titleName} {name}";
+
+            applicationCode = applicationCode == "NO_EVENT" ? _titleName : applicationCode;
 
             sdgId4Log = _tableName != "SDG" ? GetSdgId(_tableName, id) : id;
 
@@ -888,19 +848,16 @@ namespace FireEventV2
 
                 try
                 {
-                    string sql = "begin lims.Insert_To_Sdg_Log  (" + sdgId4Log + ", '" + applicationCode + "'," +
-                                 sessionId.ToString() + ", '" + _eventName + "' ); end;";
+                    string sql = $"BEGIN lims.Insert_To_Sdg_Log ({sdgId4Log}, '{applicationCode}', {sessionId.ToString()}, '{sdgLogDesc}'); END;";
+
                     cmd = new OracleCommand(sql, _connection);
 
-                    var res =
-                        cmd.ExecuteNonQuery();
+                    var res = cmd.ExecuteNonQuery();
 
                 }
                 catch (Exception e)
                 {
-                    //Logger.WriteLogFile(e);
-
-
+                    Logger.WriteExceptionToLog(e);
                 }
             }
         }
@@ -908,7 +865,7 @@ namespace FireEventV2
         #endregion
 
 
-        
+
         private void txtEditEntity_Enter(object sender, EventArgs e)
         {
             zLang.English();
@@ -953,7 +910,7 @@ namespace FireEventV2
             }
             catch (Exception e)
             {
-                //   Logger.WriteLogFile(e);
+                Logger.WriteExceptionToLog(e);
                 return null;
             }
             return null;
